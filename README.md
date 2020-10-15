@@ -1,5 +1,7 @@
 # apple_twitter_analysis_using_TFIDF
 apple twitter analysis using TFIDF
+- Source : Kaggle Dataset
+- URL : https://www.kaggle.com/seriousran/appletwittersentimenttexts
 
 # Purpose: 
 - uae TF-IDF data processing and feature extraction for relevant words

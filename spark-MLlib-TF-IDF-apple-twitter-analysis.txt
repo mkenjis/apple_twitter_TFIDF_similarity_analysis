@@ -1,17 +1,34 @@
 
-val rdd = sc.textFile("apple-twitter/apple-twitter-sentiment-texts-noheader.csv")
-            .map( x => Array(x.slice(0,x.lastIndexOf(",")),x.slice(x.lastIndexOf(",")+1,x.size)))
+val df = spark.read.format("csv").option("header","true").option("quoteAll","true").load("apple-twitter/apple-twitter-sentiment-texts.csv")
+
+scala> df.select("sentiment").distinct.show
++---------+
+|sentiment|
++---------+
+|       -1|
+|        0|
+|     null|
+|       1 |
+|        1|
++---------+
+
+val rdd1 = df.where("sentiment is not null").rdd
+
+val rdd = rdd1.map( x => x.toSeq.toArray ).map( x => x.map( y => y.toString.trim))
+
+rdd.map( x => x(1)).distinct.take(10)
+res1: Array[String] = Array(-1, 0, 1)
 
 -- remove nonword characters (such as punctuation).
 val nonWordSplit = rdd.flatMap(x => x(0).split("""\W+""").map(_.toLowerCase))
 nonWordSplit.sample(true, 0.3, 42).take(100).mkString(",")
-nonWordSplit.distinct.count   // 5028
+nonWordSplit.distinct.count   // 5185
 
 -- filter out numbers and tokens that are words mixed with numbers
 val regex = """[^0-9]*""".r
 val filterNumbers = nonWordSplit.filter(token => regex.pattern.matcher(token).matches)
 filterNumbers.sample(false, 0.3, 42).take(100).mkString("\n")
-filterNumbers.distinct.count   // 4143
+filterNumbers.distinct.count   // 4284
 
 -- list highest occurrence of words to get an idea which stop words to be removed
 val tokenCounts = filterNumbers.map(t => (t, 1)).reduceByKey(_ + _)
@@ -40,7 +57,7 @@ val tokenCountsFilteredAll = tokenCountsFilteredSize.filter { case (k, v) => !ra
 tokenCountsFilteredAll.top(20)(orderingAsc).mkString("\n")
 
 tokenCountsFilteredAll.count
-res24: Long = 1792
+res24: Long = 1787
 
 def tokenize(line: String): Seq[String] = {
  line.split("""\W+""")
@@ -53,7 +70,7 @@ def tokenize(line: String): Seq[String] = {
 }
 
 rdd.flatMap(x => tokenize(x(0))).distinct.count
-res27: Long = 1792
+res27: Long = 1787
 
 val sets = rdd.randomSplit(Array(0.7,0.3))
 val trainSet = sets(0)
@@ -95,27 +112,6 @@ println(v2.indices.take(10).toSeq)
 
 ---------------------
 
--- TF-IDF weighting will tend to assign a lower weighting to common terms. To see
--- this, we can compute the TF-IDF representation for a few of the terms that appear in
--- the list of top occurrences that we previously computed, such as you, do, and we:
-
-val common = sc.parallelize(Seq(Seq("you", "do", "we")))
-val tfCommon = hashingTF.transform(common)
-val tfidfCommon = idf.transform(tfCommon)
-val commonVector = tfidfCommon.first.asInstanceOf[SV]
-println(commonVector.values.toSeq)
-
--- let's apply the same transformation to a few less common terms that we might
--- intuitively associate with being more linked to specific topics or concepts:
-
-val uncommon = sc.parallelize(Seq(Seq("telescope", "legislation", "investment")))
-val tfUncommon = hashingTF.transform(uncommon)
-val tfidfUncommon = idf.transform(tfUncommon)
-val uncommonVector = tfidfUncommon.first.asInstanceOf[SV]
-println(uncommonVector.values.toSeq)
-
--------------------------
-
 import org.apache.spark.mllib.regression.LabeledPoint
 
 val zippedTrain = trainSet.zip(tfidf)
@@ -154,13 +150,19 @@ val model = new LogisticRegressionWithLBFGS().setNumClasses(3).run(train)
 val validPredicts =  test.map(p => (model.predict(p.features),p.label))
 
 validPredicts.take(20)
-res8: Array[(Double, Double)] = Array((1.0,1.0), (1.0,0.0), (1.0,1.0), (1.0,1.0), (0.0,0.0), (0.0,0.0), (1.0,1.0), (0.0,0.0), (0.0,0.0), (0.0,0.0), (0.0,0.0), (1.0,1.0), (0.0,0.0), (0.0,0.0), (0.0,0.0), (1.0,1.0), (2.0,0.0), (0.0,0.0), (1.0,0.0), (1.0,1.0))
+res17: Array[(Double, Double)] = Array((2.0,0.0), (1.0,2.0), (1.0,1.0), (1.0,1.0), (0.0,1.0), (1.0,1.0), (0.0,0.0), (1.0,0.0), (0.0,0.0), (0.0,0.0), (0.0,0.0), (0.0,0.0), (2.0,0.0), (1.0,2.0), (0.0,0.0), (0.0,0.0), (0.0,0.0), (1.0,1.0), (1.0,1.0), (1.0,0.0))
 
 import org.apache.spark.mllib.evaluation.MulticlassMetrics
 val metrics = new MulticlassMetrics(validPredicts)
-validPredicts.filter(x => x._1 == x._2).count  // 365
-validPredicts.count                            // 504
-val accuracy = metrics.accuracy   // 0.7242063492063492
+validPredicts.filter(x => x._1 == x._2).count  // 347
+validPredicts.count                            // 465
+val accuracy = metrics.accuracy   // 0.7462365591397849
+
+metrics.confusionMatrix
+res20: org.apache.spark.mllib.linalg.Matrix =
+152.0  34.0   11.0
+31.0   178.0  23.0
+3.0    16.0   17.0
 
 ---- MLlib Maive Bayes regression --------------
 
@@ -170,10 +172,16 @@ val model = NaiveBayes.train(train)
 val validPredicts =  test.map(p => (model.predict(p.features),p.label))
 
 validPredicts.take(20)
-res11: Array[(Double, Double)] = Array((1.0,1.0), (1.0,0.0), (2.0,1.0), (1.0,1.0), (0.0,0.0), (0.0,0.0), (1.0,1.0), (0.0,0.0), (0.0,0.0), (0.0,0.0), (0.0,0.0), (1.0,1.0), (0.0,0.0), (0.0,0.0), (0.0,0.0), (1.0,1.0), (2.0,0.0), (2.0,0.0), (1.0,0.0), (1.0,1.0))
+res21: Array[(Double, Double)] = Array((0.0,0.0), (0.0,2.0), (1.0,1.0), (1.0,1.0), (1.0,1.0), (0.0,1.0), (0.0,0.0), (1.0,0.0), (0.0,0.0), (0.0,0.0), (0.0,0.0), (0.0,0.0), (0.0,0.0), (1.0,2.0), (1.0,0.0), (0.0,0.0), (0.0,0.0), (1.0,1.0), (0.0,1.0), (1.0,0.0))
 
 import org.apache.spark.mllib.evaluation.MulticlassMetrics
 val metrics = new MulticlassMetrics(validPredicts)
-validPredicts.filter(x => x._1 == x._2).count  // 393
-validPredicts.count                            // 504
-val accuracy = metrics.accuracy   // 0.7599206349206349
+validPredicts.filter(x => x._1 == x._2).count  // 347
+validPredicts.count                            // 465
+val accuracy = metrics.accuracy   // 0.7462365591397849
+
+metrics.confusionMatrix
+res24: org.apache.spark.mllib.linalg.Matrix =
+165.0  25.0   7.0
+47.0   166.0  19.0
+9.0    11.0   16.0
