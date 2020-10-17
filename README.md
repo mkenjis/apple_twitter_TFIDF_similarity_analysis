@@ -1,4 +1,4 @@
-# apple_twitter_analysis_using_TFIDF
+# apple_twitter_TFIDF_similarity_analysis
 apple twitter analysis using TFIDF
 - Source : Kaggle Dataset
 - URL : https://www.kaggle.com/seriousran/appletwittersentimenttexts
